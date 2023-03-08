@@ -236,7 +236,7 @@ class BandStructure:
         WCF = WAVECARFILE(fWAV)
         # RECLENGTH=3 # the length of a record in WAVECAR. It is defined in the
         # first record, so let it be 3 fo far"
-        WCF.rl, ispin, iprec = [int(x) for x in WCF.record(0)]
+        _, ispin, iprec = [int(x) for x in WCF.record(0,cnt=3)]
         if iprec != 45200:
             raise RuntimeError("double precision WAVECAR is not supported")
         if ispin != 1:
@@ -301,6 +301,7 @@ class BandStructure:
                 symmetries_SG=self.spacegroup.symmetries,
                 spinor=self.spinor,
                 WCF=WCF,
+                WFCname = fWAV
             )
             for ik in kplist
         ]

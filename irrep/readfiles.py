@@ -45,6 +45,7 @@ class WAVECARFILE:
     def __init__(self, fname=None, RL=3):
         self.f = open(fname, "rb")
         self.rl = 3
+        self.rl = int(self.record(0)[0])
 
     def record(self, irec, cnt=np.Inf, dtype=float):
         """An auxilary function to get records from WAVECAR"""

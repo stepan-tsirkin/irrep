@@ -190,6 +190,7 @@ def sortIG(ik, kg, kpt, CG, RecLattice, Ecut0, Ecut, spinor):
         `CG[i,j]` contains the complex coefficient corresponding to 
         :math:`j^{th}` plane-wave in the expansion of :math:`i^{th}` 
         wave-function.
+        if `CG is None` - nothing is done for CG, but the indices of Gvectors are returned as CG
     RecLattice : array, shape=(3,3)
         Each row contains the cartesian coordinates of a basis vector forming 
         the unit-cell in reciprocal space.
@@ -246,10 +247,16 @@ def sortIG(ik, kg, kpt, CG, RecLattice, Ecut0, Ecut, spinor):
         igall[4, wall[i] : wall[i + 1]] = wall[i]
         igall[5, wall[i] : wall[i + 1]] = wall[i + 1]
 
-    if spinor:
-        CG = CG[:, np.hstack((sel[srt], sel[srt] + npw))]
+    if CG is not None:
+        if spinor:
+            CG = CG[:, np.hstack((sel[srt], sel[srt] + npw))]
+        else:
+            CG = CG[:, sel[srt]]
     else:
-        CG = CG[:, sel[srt]]
+        if spinor:
+            CG = np.hstack((sel[srt], sel[srt] + npw))
+        else:
+            CG = sel[srt]
 
     return CG, igall
 
