@@ -15,7 +15,7 @@
 ##  e-mail: stepan.tsirkin@physik.uzh.ch                         #
 ##################################################################
 
-
+import h5py
 import numpy as np
 import numpy.linalg as la
 import copy
@@ -914,44 +914,77 @@ class Kpoint:
             self.upper = np.NaN
 
 
+        hdf5_flag = 0
         npw = int(kptxml.find("npw").text)
         #        kg= np.random.randint(100,size=(npw,3))-50
         npwtot = npw * (2 if self.spinor else 1)
         CG = np.zeros((IBend - IBstart, npwtot), dtype=complex)
         wfcname="wfc{}{}".format({None:"","dw":"dw","up":"up"}[spin_channel],ik+1)
         try:
+            fWFC = h5py.File("{}.save/{}.hdf5".format(prefix,wfcname.lower()),'r')
+            hdf5_flag = 1
+        except FileNotFoundError:
+            fWFC = h5py.File("{}.save/{}.hdf5".format(prefix,wfcname.upper()),'r')
+            hdf5_flag = 1          
+        except FileNotFoundError:
             fWFC=FF("{}.save/{}.dat".format(prefix,wfcname.lower()),"r")
         except FileNotFoundError:
             fWFC=FF("{}.save/{}.dat".format(prefix,wfcname.upper()),"r")
+        
+        
+        if hdf5_flag==0:
+            rec = record_abinit(fWFC, "i4,3f8,i4,i4,f8")[0]
+            ik, xk, ispin, gamma_only, scalef = rec
+            #        xk/=bohr
+            #        xk=xk.dot(np.linalg.inv(RecLattice))
 
-        rec = record_abinit(fWFC, "i4,3f8,i4,i4,f8")[0]
-        ik, xk, ispin, gamma_only, scalef = rec
-        #        xk/=bohr
-        #        xk=xk.dot(np.linalg.inv(RecLattice))
+            rec = record_abinit(fWFC, "4i4")
+            #        print ('rec=',rec)
+            ngw, igwx, npol, nbnd = rec
 
-        rec = record_abinit(fWFC, "4i4")
-        #        print ('rec=',rec)
-        ngw, igwx, npol, nbnd = rec
+            rec = record_abinit(fWFC, "(3,3)f8")
+            #        print ('rec=',rec)
+            B = np.array(rec)
+            #        print (np.mean(B/RecLattice))
+            self.K = xk.dot(np.linalg.inv(B))
 
-        rec = record_abinit(fWFC, "(3,3)f8")
-        #        print ('rec=',rec)
-        B = np.array(rec)
-        #        print (np.mean(B/RecLattice))
-        self.K = xk.dot(np.linalg.inv(B))
+            rec = record_abinit(fWFC, "({},3)i4".format(igwx))
+            #        print ('rec=',rec)
+            kg = np.array(rec)
+            #        print (np.mean(B/RecLattice))
+            #        print ("k-point {0}: {1}/{2}={3}".format(ik, self.K,xk,self.K/xk))
+            #        print ("k-point {0}: {1}".format(ik,self.K ))
 
-        rec = record_abinit(fWFC, "({},3)i4".format(igwx))
-        #        print ('rec=',rec)
-        kg = np.array(rec)
-        #        print (np.mean(B/RecLattice))
-        #        print ("k-point {0}: {1}/{2}={3}".format(ik, self.K,xk,self.K/xk))
-        #        print ("k-point {0}: {1}".format(ik,self.K ))
+            for ib in range(IBend):
+                cg_tmp = record_abinit(fWFC, "{}f8".format(npwtot * 2))
+                if ib >= IBstart:
+                    CG[ib - IBstart] = cg_tmp[0::2] + 1.0j * cg_tmp[1::2]
 
-        for ib in range(IBend):
-            cg_tmp = record_abinit(fWFC, "{}f8".format(npwtot * 2))
-            if ib >= IBstart:
-                CG[ib - IBstart] = cg_tmp[0::2] + 1.0j * cg_tmp[1::2]
+            return sortIG(self.ik0, kg, self.K, CG, B, Ecut0, Ecut, self.spinor)
+        
+        elif hdf5_flag==1: #Modification for hdf5 support - experimental
+            
+            attrnames = ['gamma_only', 'igwx', 'ik', 'ispin', 'nbnd', 'ngw', 'npol', 'scale_factor', 'xk']
+            attributes =  []
+            for atr in attrnames:
+                attributes.append(fWFC.attrs[atr])
 
-        return sortIG(self.ik0, kg, self.K, CG, B, Ecut0, Ecut, self.spinor)
+            gamma_only, igwx, ik, ispin, nbnd, ngw, npol, scale_factor, xk = attributes
+            xk = np.array(xk)
+
+            Miller_Indices =  fWFC['MillerIndices']
+
+            B = np.array([Miller_Indices.attrs['bg1'],Miller_Indices.attrs['bg2'],Miller_Indices.attrs['bg3'] ])
+            self.K = xk.dot(np.linalg.inv(B))
+            kg = np.array(Miller_Indices[::])
+            
+            evc = fWFC['evc']
+            for ib in range(IBend):
+                cg_tmp = evc[ib,:]
+                if ib >= IBstart:
+                    CG[ib - IBstart] =cg_tmp[0::2] +  1.0j * cg_tmp[1::2]
+            
+            return sortIG(self.ik0, kg, self.K, CG, B, Ecut0, Ecut, self.spinor) 
 
     def write_characters(
         self,
