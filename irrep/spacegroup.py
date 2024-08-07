@@ -16,6 +16,7 @@
 ##################################################################
 
 
+from functools import cached_property
 import warnings
 import numpy as np
 from math import pi
@@ -51,6 +52,9 @@ class SymmetryOperation():
         Index of the symmetry operation.
     spinor : bool, default=true
         `True` if wave-functions are spinors, `False` if they are scalars.
+    translation_mod1 : bool, default=True
+        If `True`, the translation part of the symmetry operation is taken
+        modulo 1. Otherwise, it is taken as it is
 
     Attributes
     ---------
@@ -84,12 +88,13 @@ class SymmetryOperation():
         to that in tables.
     """
 
-    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True):
+    def __init__(self, rot, trans, Lattice, ind=-1, spinor=True, 
+                 translation_mod1=True):
         self.ind = ind
         self.rotation = rot
         self.Lattice = Lattice
-        self.translation = trans % 1
-        self.translation[1 - self.translation < 1e-5] = 0
+        self.translation_mod1 = translation_mod1
+        self.translation = self.get_transl_mod1(trans)
         self.axis, self.angle, self.inversion = self._get_operation_type()
         iangle = (round(self.angle / pi * 6) + 6) % 12 - 6
         if iangle == -6:
@@ -100,6 +105,18 @@ class SymmetryOperation():
         self.spinor_rotation = expm(-0.5j * self.angle *
                                     np.einsum('i,ijk->jk', self.axis, pauli_sigma))
         self.sign = 1  # May be changed later externally
+
+    def get_transl_mod1(self, t):
+        """
+        Take translation modulo 1 if needed.
+        governed by the translation_mod1 attribute.
+        """    
+        if self.translation_mod1:
+            t = t%1 
+            t[1 - t < 1e-5] = 0
+            return t
+        else:
+            return t
 
     def get_angle_str(self):
         """
@@ -333,7 +350,7 @@ class SymmetryOperation():
         # Print translation part
         trastr = ("\ntranslation         :  [ " 
                   + " ".join("{0:8.4f}"
-                             .format(x%1) for x in self.translation.round(6)
+                             .format(x) for x in self.get_transl_mod1(self.translation.round(6))
                              ) 
                   + " ] "
                   )
@@ -343,7 +360,7 @@ class SymmetryOperation():
             _t=self.translation_refUC(refUC,shiftUC)
             trastr = ("translation (refUC) :  [ " 
                       + " ".join("{0:8.4f}"
-                                 .format(x%1) for x in _t.round(6)
+                                 .format(x) for x in self.get_transl_mod1(_t.round(6))
                                  )
                   + " ] "
                   )
@@ -435,7 +452,7 @@ class SymmetryOperation():
         """
 
         Rcart  = self.Lattice.T.dot(self.rotation).dot(np.linalg.inv(self.Lattice).T)
-        t = - self.translation @ self.Lattice/alat/BOHR   
+        t =  - self.translation @ self.Lattice/alat/BOHR   
 
         arr = np.vstack((Rcart, [t]))
         return "\n"+"".join("   ".join(f"{x:20.15f}" for x in r) + "\n" for r in arr  )
@@ -466,6 +483,61 @@ class SymmetryOperation():
         d["translation refUC"]= t
 
         return d
+    
+    def transform_r(self, vector, inverse =False):
+        """
+        Transform a real-space vector (in lattice coordinates) under the symmetry operation.
+
+        Parameters
+        ----------
+        vector : array((...,3), dtype=float) 
+            Vector to transform. (or array of vectors)
+        
+        Returns
+        -------
+        array
+            Transformed vector.
+        """
+        if inverse:
+            return (vector-self.translation[...,:]).dot(self.rotation_inv.T)
+        else:
+            return vector.dot(self.rotation.T) + self.translation[...,:]
+        
+    @cached_property
+    def rotation_cart(self):
+        return self.Lattice.T.dot(self.rotation).dot(np.linalg.inv(self.Lattice).T)
+    
+    @cached_property
+    def reciprocal_lattice(self):
+        return np.linalg.inv(self.Lattice).T
+
+    @cached_property
+    def rotation_inv(self):
+        return np.linalg.inv(self.rotation)
+        
+    def transform_k(self, vector, inverse=False):
+        """
+        Transform a k-space vector under the symmetry operation.
+
+        Parameters
+        ----------
+        vector : array((...,3), dtype=float) 
+            Vector to transform. (or array of vectors)
+        
+        Returns
+        -------
+        array
+            Transformed vector.
+        """
+        # print (f"rotation = {self.rotation}")
+        # print (f"transforming {vector} ({vector.dot(self.reciprocal_lattice)})")
+        # print (f"by {self.rotation_inv}")
+        if inverse:
+            res = vector.dot(self.rotation)
+        else:
+            res = vector.dot(self.rotation_inv)
+        # print (f"got {res} ({res.dot(self.reciprocal_lattice)})")
+        return res
 
 
 class SpaceGroup():
@@ -501,7 +573,7 @@ class SpaceGroup():
     from_sym_file : str, default=None
         If provided, the symmetry operations are read from this file.
         (format of pw2wannier90 prefix.sym  file)
-    v : int, default=0
+    verbosity : int, default=0
         Verbosity level. Default set to minimalistic printing
 
     Attributes
@@ -562,7 +634,8 @@ class SpaceGroup():
             trans_thresh=1e-5,
             alat=None,
             from_sym_file=None,
-            v=0
+            no_match_symmetries=False,
+            verbosity=0
             ):
         self.spinor = spinor
         self.Lattice = cell[0]
@@ -575,9 +648,11 @@ class SpaceGroup():
          shiftUC_tmp) = self._findsym(cell, from_sym_file, alat)
         self.order = len(self.symmetries)
         self.alat=alat
+        if from_sym_file is not None:
+            no_match_symmetries = True
 
         # Determine refUC and shiftUC according to entries in CLI
-        self.symmetries_tables = IrrepTable(self.number, self.spinor, v=v).symmetries
+        self.symmetries_tables = IrrepTable(self.number, self.spinor, v=verbosity).symmetries
         self.refUC, self.shiftUC = self.determine_basis_transf(
                                             refUC_cli=refUC, 
                                             shiftUC_cli=shiftUC,
@@ -585,41 +660,43 @@ class SpaceGroup():
                                             shiftUC_lib=shiftUC_tmp,
                                             search_cell=search_cell,
                                             trans_thresh=trans_thresh,
-                                            v=v
+                                            verbosity=verbosity
                                             )
+
 
         # Check matching of symmetries in refUC. If user set transf.
         # in the CLI and symmetries don't match, raise a warning.
         # Otherwise, transf. was calculated automatically and 
         # matching of symmetries was checked in determine_basis_transf
-        try:
-            ind, dt, signs = self.match_symmetries(signs=self.spinor,
-                                                   trans_thresh=trans_thresh
-                                                   )
-            # Sort symmetries like in tables
-            args = np.argsort(ind)
-            for i,i_ind in enumerate(args):
-                self.symmetries[i_ind].ind = i+1
-                self.symmetries[i_ind].sign = signs[i_ind]
-                self.symmetries.append(self.symmetries[i_ind])
-            self.symmetries = self.symmetries[i+1:]
-        except RuntimeError:
-            if search_cell:  # symmetries must match to identify irreps
-                raise RuntimeError((
-                    "refUC and shiftUC don't transform the cellto one where "
-                    "symmetries are identical to those read from tables. "
-                    "Try without specifying refUC and shiftUC."
-                    ))
-            elif refUC is not None or shiftUC is not None:
-                # User specified refUC or shiftUC in CLI. He/She may
-                # want the traces in a cell that is not neither the
-                # one in tables nor the DFT one
-                msg = ("WARNING: refUC and shiftUC don't transform the cell to "
-                       "one where symmetries are identical to those read from "
-                       "tables. If you want to achieve the same cell as in "
-                       "tables, try not specifying refUC and shiftUC.")
-                log_message(msg, v, 1)
-                pass
+        if not no_match_symmetries:
+            try:
+                ind, dt, signs = self.match_symmetries(signs=self.spinor,
+                                                    trans_thresh=trans_thresh
+                                                    )
+                # Sort symmetries like in tables
+                args = np.argsort(ind)
+                for i,i_ind in enumerate(args):
+                    self.symmetries[i_ind].ind = i+1
+                    self.symmetries[i_ind].sign = signs[i_ind]
+                    self.symmetries.append(self.symmetries[i_ind])
+                self.symmetries = self.symmetries[i+1:]
+            except RuntimeError:
+                if search_cell:  # symmetries must match to identify irreps
+                    raise RuntimeError((
+                        "refUC and shiftUC don't transform the cellto one where "
+                        "symmetries are identical to those read from tables. "
+                        "Try without specifying refUC and shiftUC."
+                        ))
+                elif refUC is not None or shiftUC is not None:
+                    # User specified refUC or shiftUC in CLI. He/She may
+                    # want the traces in a cell that is not neither the
+                    # one in tables nor the DFT one
+                    msg = ("WARNING: refUC and shiftUC don't transform the cell to "
+                        "one where symmetries are identical to those read from "
+                        "tables. If you want to achieve the same cell as in "
+                        "tables, try not specifying refUC and shiftUC.")
+                    log_message(msg, verbosity, 1)
+                    pass
 
     def _findsym(self, cell, from_sym_file, alat):
         """
@@ -629,7 +706,8 @@ class SpaceGroup():
         ----------
         cell : list
             `cell[0]` is a 3x3 array where cartesian coordinates of basis 
-            vectors **a**, **b** and **c** are given in rows. `cell[1]` is an array
+            vectors **a**, **b** and **c** are given in rows. 
+            `cell[1]` is an array
             where each row contains the direct coordinates of an ion's position. 
             `cell[2]` is an array where each element is a number identifying the 
             atomic species of an ion. See `cell` parameter of function 
@@ -682,9 +760,13 @@ class SpaceGroup():
             translations = dataset.translations
 
         if from_sym_file is not None:
+            print (f"Reading symmetries from file {from_sym_file}")
             assert alat is not None, "Lattice parameter must be provided to read symmetries from file"
             rot_cart, trans_cart = read_sym_file(from_sym_file)
             rotations, translations = cart_to_crystal(rot_cart, trans_cart, lattice, alat )
+            translation_mod_1=False
+        else:
+            translation_mod_1=True
 
         symmetries = []
         for i, rot in enumerate(rotations):
@@ -692,13 +774,21 @@ class SpaceGroup():
                                                 translations[i],
                                                 cell[0],
                                                 ind=i+1,
-                                                spinor=self.spinor))
+                                                spinor=self.spinor,
+                                                translation_mod1=translation_mod_1))
 
         return (symmetries, 
                 symbol,
                 number,
                 transformation_matrix,
                 origin_shift)
+
+    @property
+    def size(self):
+        """
+        Number of symmetry operations in the space-group.
+        """
+        return len(self.symmetries)
 
     def json(self, symmetries=None):
         '''
@@ -949,7 +1039,7 @@ class SpaceGroup():
         return np.array([R1.dot(b).dot(R1.T.conj()).dot(np.linalg.inv(
             a)).diagonal().mean().real.round() for a, b in zip(S1, S2)], dtype=int)
 
-    def get_irreps_from_table(self, kpname, K, v=0):
+    def get_irreps_from_table(self, kpname, K, verbosity=0):
         """
         Read irreps of the little-group of a maximal k-point. 
         
@@ -959,7 +1049,7 @@ class SpaceGroup():
             Label of the maximal k-point.
         K : array, shape=(3,)
             Direct coordinates of the k-point.
-        v : int, default=0
+        verbosity : int, default=0
             Verbosity level. Default set to minimalistic printing
 
         Returns
@@ -987,7 +1077,7 @@ class SpaceGroup():
             given in parameter `kpname`.
         """
 
-        table = IrrepTable(self.number, self.spinor, v=v)
+        table = IrrepTable(self.number, self.spinor, v=verbosity)
         tab = {}
         for irr in table.irreps:
             if irr.kpname == kpname:
@@ -1028,7 +1118,7 @@ class SpaceGroup():
             shiftUC_lib,
             search_cell,
             trans_thresh,
-            v=0
+            verbosity=0
             ):
         """ 
         Determine basis transformation to conventional cell. Priority
@@ -1054,7 +1144,7 @@ class SpaceGroup():
             It is `True` if kpnames was specified in CLI.
         trans_thresh : float, default=1e-5
             Threshold to compare translational parts of symmetries.
-        v : int, default=0
+        verbosity : int, default=0
             Verbosity level. Default set to minimalistic printing
 
         Returns
@@ -1081,21 +1171,21 @@ class SpaceGroup():
         if refUC_cli_bool and shiftUC_cli_bool:  # Both specified in CLI.
             refUC = refUC_cli.T  # User sets refUC as if it was acting on column
             shiftUC = shiftUC_cli
-            log_message('refUC and shiftUC read from CLI', v, 1)
+            log_message('refUC and shiftUC read from CLI', verbosity, 1)
             return refUC, shiftUC
         elif refUC_cli_bool and not shiftUC_cli_bool:  # shiftUC not given in CLI.
             refUC = refUC_cli.T  # User sets refUC as if it was acting on column
             shiftUC = np.zeros(3, dtype=float)
             msg = ('refUC was specified in CLI, but shiftUC was not. Taking '
                    'shiftUC=(0,0,0)')
-            log_message(msg, v, 1)
+            log_message(msg, verbosity, 1)
             return refUC, shiftUC
         elif not refUC_cli_bool and shiftUC_cli_bool:  # refUC not given in CLI.
             refUC = np.eye(3, dtype=float)
             shiftUC = shiftUC_cli
             msg = ('shitfUC was specified in CLI, but refUC was not. Taking '
                    '3x3 identity matrix as refUC.')
-            log_message(msg, v, 1)
+            log_message(msg, verbosity, 1)
             return refUC, shiftUC
         elif not search_cell:
             refUC = np.eye(3, dtype=float)
@@ -1103,12 +1193,12 @@ class SpaceGroup():
             msg = ('Taking 3x3 identity matrix as refUC and shiftUC=(0,0,0). '
                    'If you want to calculate the transformation to '
                    'conventional cell, run IrRep with -searchcell')
-            log_message(msg, v, 1)
+            log_message(msg, verbosity, 1)
             return refUC, shiftUC
         else:  # Neither specifiend in CLI.
             msg = ('Determining transformation to conventional setting '
                    '(refUC and shiftUC)')
-            log_message(msg, v, 1)
+            log_message(msg, verbosity, 1)
             refUC = np.linalg.inv(refUC_lib)  # from DFT to convenctional cell
 
             # Check if the shift given by spglib works
@@ -1139,7 +1229,7 @@ class SpaceGroup():
                                             trans_thresh=trans_thresh
                                             )
                         msg = (f'ShiftUC achieved with the centering: {r_center}')
-                        log_message(msg, v, 1)
+                        log_message(msg, verbosity, 1)
                         return refUC, shiftUC
                     except RuntimeError:
                         pass
@@ -1162,7 +1252,7 @@ class SpaceGroup():
                                '  (2) Move origin of convenctional cell to the '
                                'inversion-center: {}'
                                .format(0.5 * inv.translation, r_center))
-                        log_message(msg, v, 1)
+                        log_message(msg, verbosity, 1)
                         return refUC, shiftUC
                     except RuntimeError:
                         pass
@@ -1376,8 +1466,8 @@ def read_sym_file(fname):
     nsym = int(lines[0][0])
     assert len(lines) == 1 + 4 * nsym
     RT = np.array(lines[1:], dtype=float).reshape(nsym, 4, 3)
-    rotations = RT[:, 0:3]
-    translations = RT[:, 3] 
+    rotations = RT[:, 0:3]#.swapaxes(1, 2)
+    translations = RT[:, 3]
     return rotations, translations
 
 def cart_to_crystal(rot_cart, trans_cart, lattice, alat):
@@ -1413,5 +1503,5 @@ def cart_to_crystal(rot_cart, trans_cart, lattice, alat):
     rot_crystal = np.array([(lat_inv.T @ rot @  lattice.T) for rot in rot_cart])
     assert np.allclose(rot_crystal, np.round(rot_crystal)), f"rotations are not integers in crystal coordinates : {rot_crystal}"
     rot_crystal = np.round(rot_crystal).astype(int)
-    trans_crystal = trans_cart @ lat_inv * alat * BOHR
+    trans_crystal = - trans_cart @ lat_inv * alat * BOHR
     return rot_crystal , trans_crystal 

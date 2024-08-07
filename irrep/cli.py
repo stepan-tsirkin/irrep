@@ -25,7 +25,7 @@ import click
 from monty.serialization import dumpfn, loadfn
 
 from .bandstructure import BandStructure
-from .utility import str2list, short, log_message
+from .utility import sort_vectors, str2list, short, log_message
 from . import __version__ as version
 
 
@@ -189,8 +189,9 @@ do not hesitate to contact the author:
 )
 @click.option(
     "-isymsep",
-    help="Index of the symmetry to separate the eigenstates. Works well only for norm-conserving "
-    "potentials as in ABINIT.",
+    help="Index of the symmetry to separate the eigenstates. "
+    "with new method works with any code/pseudopotential"
+    "Previously worked well only for norm-conserving potentials.",
 )
 @click.option(
     "-onlysym",
@@ -238,7 +239,7 @@ do not hesitate to contact the author:
 @click.option(
     "-groupKramers", 
     flag_value=True, 
-    default=True, 
+    default=False, 
     help="Group wave-functions in pairs of Kramers. Default: True."
 )
 @click.option(
@@ -281,6 +282,12 @@ do not hesitate to contact the author:
                     "errors, but the result is not what you expected. If you "
                     "don't set this tag, you will get the basic info.")
 )
+@click.option("-json_file",
+                 type=str,
+                    default="irrep-output.json",
+                    help="File to save the output in JSON format. (without "
+                    "extension, the '.json' will be added automatically)"
+)
 def cli(
     ecut,
     fwav,
@@ -312,7 +319,8 @@ def cli(
     searchcell,
     correct_ecut0,
     trans_thresh,
-    v
+    v,
+    json_file
 ):
     """
     Defines the "irrep" command-line tool interface.
@@ -324,10 +332,14 @@ def cli(
         refuc = np.array(refuc.split(","), dtype=float).reshape((3, 3))
     if shiftuc:
         shiftuc = np.array(shiftuc.split(","), dtype=float).reshape(3)
-    
+
+    # rename the v flag to verbosity, to avoid overlap with local variables
+    verbosity = v    
     # Warning about kpnames
     if kpnames is not None:
         searchcell = True
+
+
 
     elif not searchcell:
         msg = ("Warning: transformation to the convenctional unit "
@@ -336,12 +348,12 @@ def cli(
                "on:\n"
                "irrep --help"
                )
-        log_message(msg, v, 1)
+        log_message(msg, verbosity, 1)
         msg = ("Warning: -kpnames not specified. Only traces of "
                "symmetry operations will be calculated. Remember that "
                "-kpnames must be specified to identify irreps"
                )
-        log_message(msg, v, 1)
+        log_message(msg, verbosity, 1)
 
     # parse input arguments into lists if supplied
     if symmetries:
@@ -377,7 +389,7 @@ def cli(
         search_cell = searchcell,
         degen_thresh=degenthresh,
         save_wf=save_wf,
-        v=v,
+        verbosity=verbosity,
         from_sym_file=from_sym_file
     )
 
@@ -395,7 +407,7 @@ def cli(
                 )
 
     # Identify irreps. If kpnames wasn't set, all will be labelled as None
-    bandstr.identify_irreps(kpnames, v=v)
+    bandstr.identify_irreps(kpnames, verbosity=verbosity)
 
     # Temporary, until we make it valid for isymsep
     bandstr.write_characters()
@@ -423,12 +435,15 @@ def cli(
         for isym in isymsep:
             print("\n-------- SEPARATING BY SYMMETRY # {} --------".format(isym))
             for s_old, bs in subbands.items():
-                separated = bs.Separate(isym, degen_thresh=degenthresh, groupKramers=groupkramers, v=v)
+                separated = bs.Separate(isym, groupKramers=groupkramers, verbosity=verbosity)
                 for s_new, bs_separated in separated.items():
                     tmp_subbands[tuple(list(s_old) + [s_new])] = bs_separated
             subbands = tmp_subbands
         json_data["characters and irreps"]=[]
-        for k, sub in subbands.items():
+        
+        # sort to have consistency between runs
+        for k in sort_vectors(subbands.keys()):
+            sub = subbands[k]
             if isymsep is not None:
                 print(
                     "\n\n\n\n ################################################ \n\n\n NEXT SUBSPACE:  ",
@@ -437,12 +452,12 @@ def cli(
                     ),
                 )
                 sub.write_characters()
-                json_data["characters and irreps"].append({"symmetry eigenvalues":k , "subspace": sub.json(symmetries)})
+                json_data["characters and irreps"].append({"symmetry eigenvalues": np.array(k) , "subspace": sub.json(symmetries)})
     else :
         json_data["separated by symmetry"]=False
         
 
-    dumpfn(json_data,"irrep-output.json",indent=4)
+    dumpfn(json_data, json_file, indent=4)
 
     if zak:
         for k in subbands:

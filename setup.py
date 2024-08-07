@@ -17,7 +17,7 @@ setuptools.setup(
         "Click",
         "monty",
         "ruamel.yaml",
-        "irreptables",
+        "irreptables>=1.1.0",
         "fortio",
         "packaging"
     ],

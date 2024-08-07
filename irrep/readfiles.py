@@ -126,14 +126,14 @@ class ParserAbinit():
         self.fWFK = FFR(filename)  # temporary
         self.kpt_count = 0  # index of the next k-point to be read
 
-    def parse_header(self, v=0):
+    def parse_header(self, verbosity=0):
         '''
         Parse header of WFK file and save as attributes quantities that 
         will be used in the rest of methods
 
         Parameters
         ----------
-        v : int, default=0
+        verbosity : int, default=0
             Verbosity level. Default set to minimal printing
 
         Returns
@@ -173,7 +173,7 @@ class ParserAbinit():
             msg = ("WARNING, the version {0} of abinit is not in {1} "
                    "and may not be fully tested"
                    .format(codsvn, defversion))
-            log_message(msg, v, 1)
+            log_message(msg, verbosity, 1)
         if headform < 80:
             raise ValueError(
                 "Head form {0}<80 is not supported".format(headform)
@@ -396,13 +396,13 @@ class ParserVasp:
         if not onlysym:
             self.fWAV = WAVECARFILE(fWAV)
 
-    def parse_poscar(self, v=0):
+    def parse_poscar(self, verbosity=0):
         """
         Parses POSCAR.
 
         Parameters
         ----------
-        v : int, default=0
+        verbosity : int, default=0
             Verbosity level. Default set to minimal printing
 
         Returns
@@ -417,7 +417,7 @@ class ParserVasp:
         """
 
         msg = f'Reading POSCAR: {self.fPOS}'
-        log_message(msg, v, 1)
+        log_message(msg, verbosity, 1)
         fpos = (l.strip() for l in open(self.fPOS))
         title = next(fpos)  # title
         del title
@@ -658,7 +658,7 @@ class ParserEspresso:
         return lattice, positions, typat, alat
 
 
-    def parse_kpoint(self, ik, NBin, spin_channel, v=0):
+    def parse_kpoint(self, ik, NBin, spin_channel, verbosity=0):
         '''
         Parse block of a particular k-point from `data-file-schema.xml` file
 
@@ -670,6 +670,9 @@ class ParserEspresso:
             Number of bands
         spin_channel : str
             `up` for spin up, `dw` for spin down, `None` if not spin polarized
+        verbosity : int, default=0
+            Verbosity level. Default set to minimalistic printing
+       
 
         Returns
         -------
@@ -683,9 +686,7 @@ class ParserEspresso:
             reciprocal lattice vector
         kpt : array
             Direct coords of the k-point w.r.t. DFT cell vectors
-        v : int, default=0
-            Verbosity level. Default set to minimalistic printing
-        '''
+         '''
 
         kptxml = self.bandstr.findall("ks_energies")[ik]
 
@@ -718,7 +719,7 @@ class ParserEspresso:
         npw = int(kptxml.find("npw").text)
         npwtot = npw * (2 if self.spinor else 1)
         msg = 'npwtot: {}, igwx: {}'.format(npwtot, igwx)
-        log_message(msg, v, 2)
+        log_message(msg, verbosity, 2)
         WF = np.zeros((NBin, npwtot), dtype=complex)
         for ib in range(NBin):
             rec = record_abinit(fWFC, "{}f8".format(npwtot * 2))

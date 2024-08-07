@@ -246,7 +246,7 @@ def format_matrix(A):
         Description of the matrix. Ready to be printed.
     """
     return "".join(
-        "   ".join("{0:+5.2f} {1:+5.2f}".format(x.real, x.imag) for x in a)
+        "   ".join("{0:+5.2f} {1:+5.2f}j".format(x.real, x.imag) for x in a)
         + "\n"
         for a in A
     )
@@ -268,3 +268,115 @@ def log_message(msg, verbosity, level):
 
     if verbosity >= level:
         print(msg)
+
+
+def orthogonolize(A, warning_threshold=np.inf, error_threshold=np.inf , verbosity=1):
+    """
+    Orthogonalize a square matrix, using SVD
+    
+    Parameters
+    ----------
+    A : array( (M,M), dtype=complex)
+        Matrix to orthogonalize.
+    warning_threshold : float, default=np.inf
+        Threshold for warning message. Is someeigenvalues are far from 1
+    error_threshold : float, default=np.inf
+        Threshold for error message. Is someeigenvalues are far from 1
+
+    Returns
+    -------
+    array( (M,M), dtype=complex)
+        Orthogonalized matrix
+    """
+    u, s, vh = np.linalg.svd(A)
+    if np.any(np.abs(s - 1) > error_threshold):
+        raise ValueError("Matrix is not orthogonal", A)
+    elif np.any(np.abs(s - 1) > warning_threshold):
+        log_message(f"Warning: Matrix is not orthogonal {A}", verbosity, 1)
+    return u @ vh
+
+def sort_vectors(list_of_vectors):
+    list_of_vectors = list(list_of_vectors)
+    print (list_of_vectors)
+    srt = arg_sort_vectors(list_of_vectors)
+    print (list_of_vectors, srt)
+    return [list_of_vectors[i] for i in srt]
+
+def arg_sort_vectors(list_of_vectors):
+    """
+    Compare two vectors, 
+    First, the longer vector is "larger"
+    second, we go element-by-element to compare
+    first compare the angle of the complex number (clockwise from the x-axis), then the absolute value
+    
+    Returns
+    -------
+    bool
+        True if v1>v2, False otherwise
+    """
+    if all( np.all(abs(np.array(key).imag)<1e-4) for key in list_of_vectors):
+        def key(x):
+            return np.real(x)
+    else:
+        def key(x):
+            return (np.angle(x)/(2*np.pi)+0.01)%1
+    def serialize(x, lenmax):
+        return [len(x)]+ [key(y) for y in x] + [0]*(lenmax-len(x))
+    lenmax = max([len(x) for x in list_of_vectors])
+    sort_key = [serialize(x, lenmax) for x in list_of_vectors]
+    srt = np.lexsort(np.array(sort_key).T, axis=0)
+    return srt
+
+def get_borders(E, thresh=1e-5, cyclic=False):
+    """
+    Get the borders of the blocks of degenerate eigenvalues.
+
+    Parameters
+    ----------
+    E : array
+        Eigenvalues.
+    thresh : float, default=1e-5
+        Threshold for the difference between eigenvalues.
+    cyclic : bool, default=False
+        If `True`, the first and last eigenvalues are considered to be close. 
+        (e.g. complex eigenvalues on the unit circle).
+
+    Returns
+    -------
+    array(int)
+        Borders of the blocks of degenerate eigenvalues.
+    """
+    if cyclic:
+        return np.where(abs(E - np.roll(E, 1)) > thresh)[0]
+    else:
+        return np.hstack([
+                [0],
+                np.where(abs(E[1:] - E[:-1]) > thresh)[0] + 1,
+                [len(E)],
+            ])
+
+def get_block_indices(E, thresh=1e-5, cyclic=False):
+    """
+    Get the indices of the blocks of degenerate eigenvalues.
+
+    Parameters
+    ----------
+    E : array
+        Eigenvalues.
+    thresh : float, default=1e-5
+        Threshold for the difference between eigenvalues.
+    cyclic : bool, default=False
+        If `True`, the first and last eigenvalues are considered to be close. 
+        (e.g. complex eigenvalues on the unit circle).
+
+    Returns
+    -------
+    array((N,2), dtype=int)
+        Indices of the blocks of degenerate eigenvalues.
+    """
+    borders = get_borders(E, thresh=thresh, cyclic=cyclic)
+    if cyclic:
+        return np.array([borders, np.roll(borders, -1)]).T
+    else:
+        return np.array([borders[:-1], borders[1:]]).T
+       
