@@ -24,7 +24,7 @@ import spglib
 from irrep.parsers import ParserAbinit, ParserEspresso, ParserVasp, ParserW90
 
 from .symmetry_operation import SymmetryOperation
-from .utility import BOHR, group_numbers, log_message, select_irreducible
+from .utility import BOHR, clean_np_load, group_numbers, log_message, select_irreducible
 from packaging import version
 import os
 
@@ -225,6 +225,27 @@ class SpaceGroup:
                 if val is not None:
                     dic[key] = val
         return dic
+
+    @classmethod
+    def from_dict(cls, dic):
+        """
+        Create a SpaceGroup object from a dictionary.
+        """
+        dic_clean = clean_np_load(dic)
+        return cls(**dic_clean)
+
+    @classmethod
+    def from_npz(cls, file_path):
+        """
+        Create a SpaceGroup object from a .npz file.
+        """
+        return cls.from_dict(np.load(file_path, allow_pickle=True))
+
+    def to_npz(self, file_path):
+        """
+        Save the SpaceGroup object to a .npz file.
+        """
+        np.savez(file_path, **self.as_dict())
 
     @property
     def size(self):
