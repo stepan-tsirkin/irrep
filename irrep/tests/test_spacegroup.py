@@ -1,5 +1,6 @@
 from irrep.spacegroup import SpaceGroup
 import numpy as np
+import pytest
 
 from irrep.tests.test_dmn import REF_FILES_PATH, TMP_FILES_PATH
 
@@ -167,7 +168,7 @@ def test_wyckoff_positions_2():
     # checking correct parsing of the symbolic strings
     assert MnTe_wyckoffs[4].split(',')[1] == '2.0*x'
     return
-    
+
 
 def test_implicit_multiplication_parsing():
     """test lines 1060-1061 of spacegroup.py, which use parse_expr with implicit multiplication"""
@@ -176,3 +177,22 @@ def test_implicit_multiplication_parsing():
     assert parse_expr('2x', transformations=_TRANSFORMS) == 2 * x
     assert parse_expr('-2x+1', transformations=_TRANSFORMS) == -2 * x + 1
     assert parse_expr('2x-y', transformations=_TRANSFORMS) == 2 * x - y
+
+
+@pytest.mark.parametrize("include_TR", [True, False])
+def test_spacegroup_save_load(include_TR):
+    spacegroup_Te = SpaceGroup.from_cell(**struct_param_Te,
+                                         include_TR=include_TR)
+    tmp_file_path = TMP_DATA_PATH / "spacegroup_Te_TR={}.npz".format(include_TR)
+    print(f"spinor : {spacegroup_Te.spinor}, include_TR: {include_TR}")
+    np.savez(tmp_file_path, **spacegroup_Te.as_dict())
+    spacegroup_Te_loaded = SpaceGroup.from_npz(tmp_file_path)
+    for key in spacegroup_Te.__dict__:
+        type_key = type(spacegroup_Te.__dict__[key])
+        assert type_key == type(spacegroup_Te_loaded.__dict__[key]), f"Type mismatch in attribute {key}, saved {type(getattr(spacegroup_Te, key))}, loaded {type(getattr(spacegroup_Te_loaded, key))}"
+        if key in ['real_lattice', 'positions', 'typat', 'magmom', 'number', 'number_str']:
+            if type_key == np.ndarray:
+                assert np.allclose(getattr(spacegroup_Te, key), getattr(spacegroup_Te_loaded, key)), f"Value mismatch in attribute {key}, saved {getattr(spacegroup_Te, key)}, loaded {getattr(spacegroup_Te_loaded, key)}"
+            else:
+                assert getattr(spacegroup_Te, key) == getattr(spacegroup_Te_loaded, key), f"Value mismatch in attribute {key}, saved {getattr(spacegroup_Te, key)}, loaded {getattr(spacegroup_Te_loaded, key)}"
+    assert spacegroup_Te.equals(spacegroup_Te_loaded), "Loaded spacegroup is not equal to the original"

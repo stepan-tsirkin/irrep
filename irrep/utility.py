@@ -798,3 +798,14 @@ class DummyMethodTables(DummyMethod):
         message = f"{method_name} requires irreptables package to be installed. " \
             f"Please install irreptables>=3.0.0 via pip: pip install irreptables"
         super().__init__(message)
+
+
+def clean_np_load(dict):
+    """converts zero-dimensional np.ndarray to python scalars"""
+    dict_new = {}
+    for key, val in dict.items():
+        if isinstance(val, np.ndarray) and val.ndim == 0:
+            dict_new[key] = val.item()
+        else:
+            dict_new[key] = val
+    return dict_new
